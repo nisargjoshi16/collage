@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,54 +16,72 @@ PRESETS: dict[str, dict[str, Any]] = {
         "rows": 2,
         "cols": 2,
         "output_size": [1200, 1200],
-        "gap": 8,
-        "background": "#FFFFFF",
+        "gap": 0,
+        "background": "#000000",
     },
     "grid_3x3": {
         "layout": "grid",
         "rows": 3,
         "cols": 3,
         "output_size": [1500, 1500],
-        "gap": 6,
-        "background": "#FFFFFF",
+        "gap": 0,
+        "background": "#000000",
     },
     "horizontal_strip": {
         "layout": "horizontal",
-        "output_size": [1920, 600],
-        "gap": 10,
-        "background": "#1a1a1a",
+        "output_size": [1920, 1080],
+        "gap": 0,
+        "background": "#000000",
     },
     "vertical_strip": {
         "layout": "vertical",
-        "output_size": [600, 1920],
-        "gap": 10,
-        "background": "#1a1a1a",
+        "output_size": [1080, 1920],
+        "gap": 0,
+        "background": "#000000",
     },
     "featured_left": {
         "layout": "featured",
         "featured_ratio": 0.65,
         "featured_side": "left",
         "output_size": [1600, 900],
-        "gap": 8,
-        "background": "#FFFFFF",
+        "gap": 0,
+        "background": "#000000",
     },
     "featured_top": {
         "layout": "featured",
         "featured_ratio": 0.6,
         "featured_side": "top",
         "output_size": [1200, 1600],
-        "gap": 8,
-        "background": "#FFFFFF",
+        "gap": 0,
+        "background": "#000000",
     },
 }
+
+
+def resolve_asset_path(path: Path, search_dirs: list[Path] | None = None) -> Path:
+    """Resolve a relative asset path against known search directories."""
+    if path.is_file():
+        return path.resolve()
+
+    checked: list[Path] = []
+    for directory in search_dirs or []:
+        candidate = (directory / path).resolve()
+        checked.append(candidate)
+        if candidate.is_file():
+            return candidate
+
+    raise FileNotFoundError(
+        f"File not found: {path}. "
+        f"Searched: {', '.join(str(p) for p in checked) or 'no directories provided'}"
+    )
 
 
 @dataclass
 class LogoConfig:
     path: Path
     corner: str = "bottom-right"
-    size_ratio: float = 0.12
-    padding: int = 24
+    size_ratio: float = 0.18
+    padding: int = 16
     opacity: float = 1.0
 
     def __post_init__(self) -> None:
@@ -82,12 +100,13 @@ class LogoConfig:
 class CollageDesign:
     layout: str
     output_size: tuple[int, int]
-    gap: int = 8
-    background: str = "#FFFFFF"
+    gap: int = 0
+    background: str = "#000000"
     rows: int = 2
     cols: int = 2
     featured_ratio: float = 0.6
     featured_side: str = "left"
+    auto_fit: bool = True
     logo: LogoConfig | None = None
 
     @classmethod
@@ -106,20 +125,21 @@ class CollageDesign:
                 logo = LogoConfig(
                     path=Path(logo_data["path"]),
                     corner=logo_data.get("corner", "bottom-right"),
-                    size_ratio=logo_data.get("size_ratio", logo_data.get("size", 0.12)),
-                    padding=logo_data.get("padding", 24),
+                    size_ratio=logo_data.get("size_ratio", logo_data.get("size", 0.18)),
+                    padding=logo_data.get("padding", 16),
                     opacity=logo_data.get("opacity", 1.0),
                 )
 
         return cls(
             layout=layout,
             output_size=(int(output_size[0]), int(output_size[1])),
-            gap=int(data.get("gap", 8)),
-            background=data.get("background", "#FFFFFF"),
+            gap=int(data.get("gap", 0)),
+            background=data.get("background", "#000000"),
             rows=int(data.get("rows", 2)),
             cols=int(data.get("cols", 2)),
             featured_ratio=float(data.get("featured_ratio", 0.6)),
             featured_side=data.get("featured_side", "left"),
+            auto_fit=bool(data.get("auto_fit", True)),
             logo=logo,
         )
 
@@ -140,9 +160,13 @@ class CollageDesign:
             raise ValueError("featured_side must be left, right, top, or bottom")
 
 
-def load_design(source: str | Path) -> CollageDesign:
+def load_design(
+    source: str | Path,
+    search_dirs: list[Path] | None = None,
+) -> CollageDesign:
     """Load a design from a preset name, JSON file path, or JSON string."""
     source_str = str(source).strip()
+    dirs = [Path.cwd(), *list(search_dirs or [])]
 
     if source_str in PRESETS:
         design = CollageDesign.from_dict(PRESETS[source_str])
@@ -151,16 +175,21 @@ def load_design(source: str | Path) -> CollageDesign:
 
     path = Path(source_str)
     if path.is_file():
+        dirs.insert(0, path.parent.resolve())
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
         design = CollageDesign.from_dict(data)
         design.validate()
+        if design.logo:
+            design.logo.path = resolve_asset_path(design.logo.path, dirs)
         return design
 
     try:
         data = json.loads(source_str)
         design = CollageDesign.from_dict(data)
         design.validate()
+        if design.logo:
+            design.logo.path = resolve_asset_path(design.logo.path, dirs)
         return design
     except json.JSONDecodeError as exc:
         raise ValueError(

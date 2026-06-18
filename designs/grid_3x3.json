@@ -3,6 +3,7 @@
   "rows": 3,
   "cols": 3,
   "output_size": [1500, 1500],
-  "gap": 6,
-  "background": "#F5F5F5"
+  "gap": 0,
+  "background": "#000000",
+  "auto_fit": true
 }

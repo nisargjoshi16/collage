@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .collage import create_collage
-from .designs import CORNER_CHOICES, list_presets, load_design
+from .designs import CORNER_CHOICES, list_presets, load_design, resolve_asset_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,14 +57,14 @@ Examples:
     parser.add_argument(
         "--logo-size",
         type=float,
-        default=0.12,
-        help="Logo size as fraction of canvas width (default: 0.12)",
+        default=0.18,
+        help="Logo size as fraction of canvas width (default: 0.18)",
     )
     parser.add_argument(
         "--logo-padding",
         type=int,
-        default=24,
-        help="Padding from canvas edge in pixels (default: 24)",
+        default=16,
+        help="Padding from canvas edge in pixels (default: 16)",
     )
     parser.add_argument(
         "--max-images",
@@ -96,8 +96,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.logo:
             from .designs import LogoConfig
 
+            logo_path = resolve_asset_path(args.logo, [Path.cwd()])
             design.logo = LogoConfig(
-                path=args.logo,
+                path=logo_path,
                 corner=args.logo_corner,
                 size_ratio=args.logo_size,
                 padding=args.logo_padding,

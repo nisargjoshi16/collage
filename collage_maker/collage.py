@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
-from .designs import CollageDesign, LogoConfig
+from .designs import CollageDesign, LogoConfig, resolve_asset_path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
 
@@ -31,7 +32,8 @@ def hex_to_rgb(color: str) -> tuple[int, int, int]:
     return tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+def cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Resize and crop an image to completely fill the target size."""
     target_w, target_h = size
     if target_w <= 0 or target_h <= 0:
         return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
@@ -48,84 +50,167 @@ def fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return resized.crop((left, top, left + target_w, top + target_h))
 
 
+def _cell_sizes(total: int, count: int, gap: int) -> list[int]:
+    if count <= 0:
+        return []
+    if count == 1:
+        return [total]
+    usable = total - gap * (count - 1)
+    base, remainder = divmod(usable, count)
+    return [base + (1 if index < remainder else 0) for index in range(count)]
+
+
+def _cell_positions(sizes: list[int], gap: int) -> list[int]:
+    positions: list[int] = []
+    offset = 0
+    for index, size in enumerate(sizes):
+        positions.append(offset)
+        offset += size + (gap if index < len(sizes) - 1 else 0)
+    return positions
+
+
+def auto_grid_dimensions(count: int, output_size: tuple[int, int]) -> tuple[int, int]:
+    """Pick rows/cols that fill the canvas without empty cells."""
+    if count <= 1:
+        return 1, 1
+
+    width, height = output_size
+    target_aspect = width / height if height else 1.0
+    best: tuple[float, int, int] | None = None
+
+    for cols in range(1, count + 1):
+        rows = math.ceil(count / cols)
+        empty = rows * cols - count
+        grid_aspect = cols / rows
+        aspect_penalty = abs(math.log(grid_aspect / target_aspect)) if target_aspect > 0 else 0.0
+        score = empty * 1000 + aspect_penalty
+        if best is None or score < best[0]:
+            best = (score, rows, cols)
+
+    assert best is not None
+    return best[1], best[2]
+
+
+def resolve_grid_dimensions(
+    design: CollageDesign,
+    image_count: int,
+) -> tuple[int, int]:
+    if design.auto_fit or image_count > design.rows * design.cols:
+        return auto_grid_dimensions(image_count, design.output_size)
+
+    if image_count < design.rows * design.cols:
+        return auto_grid_dimensions(image_count, design.output_size)
+
+    return design.rows, design.cols
+
+
 def compute_cells(design: CollageDesign, image_count: int) -> list[tuple[int, int, int, int]]:
     width, height = design.output_size
     gap = design.gap
 
     if design.layout == "grid":
-        rows, cols = design.rows, design.cols
-        cell_w = (width - gap * (cols + 1)) // cols
-        cell_h = (height - gap * (rows + 1)) // rows
+        rows, cols = resolve_grid_dimensions(design, image_count)
+        col_sizes = _cell_sizes(width, cols, gap)
+        row_sizes = _cell_sizes(height, rows, gap)
+        col_positions = _cell_positions(col_sizes, gap)
+        row_positions = _cell_positions(row_sizes, gap)
+
         cells = []
-        for index in range(min(image_count, rows * cols)):
+        for index in range(image_count):
             row = index // cols
             col = index % cols
-            x = gap + col * (cell_w + gap)
-            y = gap + row * (cell_h + gap)
-            cells.append((x, y, cell_w, cell_h))
+            cells.append((
+                col_positions[col],
+                row_positions[row],
+                col_sizes[col],
+                row_sizes[row],
+            ))
         return cells
 
     if design.layout == "horizontal":
-        count = image_count
-        cell_w = (width - gap * (count + 1)) // count
-        cell_h = height - 2 * gap
+        col_sizes = _cell_sizes(width, image_count, gap)
+        col_positions = _cell_positions(col_sizes, gap)
         return [
-            (gap + i * (cell_w + gap), gap, cell_w, cell_h)
-            for i in range(count)
+            (col_positions[index], 0, col_sizes[index], height)
+            for index in range(image_count)
         ]
 
     if design.layout == "vertical":
-        count = image_count
-        cell_w = width - 2 * gap
-        cell_h = (height - gap * (count + 1)) // count
+        row_sizes = _cell_sizes(height, image_count, gap)
+        row_positions = _cell_positions(row_sizes, gap)
         return [
-            (gap, gap + i * (cell_h + gap), cell_w, cell_h)
-            for i in range(count)
+            (0, row_positions[index], width, row_sizes[index])
+            for index in range(image_count)
         ]
 
     if design.layout == "featured":
         ratio = design.featured_ratio
         side = design.featured_side
         cells: list[tuple[int, int, int, int]] = []
+        thumb_count = max(1, image_count - 1)
 
         if side in ("left", "right"):
-            main_w = int((width - 3 * gap) * ratio)
-            thumb_w = width - main_w - 3 * gap
-            main_h = height - 2 * gap
-            thumb_count = max(1, image_count - 1)
-            thumb_h = (main_h - gap * (thumb_count - 1)) // thumb_count
+            if gap == 0:
+                main_w = int(width * ratio)
+                thumb_w = width - main_w
+            else:
+                main_w = int((width - gap) * ratio)
+                thumb_w = width - main_w - gap
+
+            main_h = height
+            row_sizes = _cell_sizes(main_h, thumb_count, gap)
+            row_positions = _cell_positions(row_sizes, gap)
 
             if side == "left":
-                cells.append((gap, gap, main_w, main_h))
-                for i in range(thumb_count):
-                    x = gap + main_w + gap
-                    y = gap + i * (thumb_h + gap)
-                    cells.append((x, y, thumb_w, thumb_h))
+                cells.append((0, 0, main_w, main_h))
+                thumb_x = main_w + gap
+                for index in range(thumb_count):
+                    cells.append((
+                        thumb_x,
+                        row_positions[index],
+                        thumb_w,
+                        row_sizes[index],
+                    ))
             else:
-                for i in range(thumb_count):
-                    x = gap
-                    y = gap + i * (thumb_h + gap)
-                    cells.append((x, y, thumb_w, thumb_h))
-                cells.append((gap + thumb_w + gap, gap, main_w, main_h))
+                for index in range(thumb_count):
+                    cells.append((
+                        0,
+                        row_positions[index],
+                        thumb_w,
+                        row_sizes[index],
+                    ))
+                cells.append((thumb_w + gap, 0, main_w, main_h))
         else:
-            main_h = int((height - 3 * gap) * ratio)
-            thumb_h = height - main_h - 3 * gap
-            main_w = width - 2 * gap
-            thumb_count = max(1, image_count - 1)
-            thumb_w = (main_w - gap * (thumb_count - 1)) // thumb_count
+            if gap == 0:
+                main_h = int(height * ratio)
+                thumb_h = height - main_h
+            else:
+                main_h = int((height - gap) * ratio)
+                thumb_h = height - main_h - gap
+
+            main_w = width
+            col_sizes = _cell_sizes(main_w, thumb_count, gap)
+            col_positions = _cell_positions(col_sizes, gap)
 
             if side == "top":
-                cells.append((gap, gap, main_w, main_h))
-                for i in range(thumb_count):
-                    x = gap + i * (thumb_w + gap)
-                    y = gap + main_h + gap
-                    cells.append((x, y, thumb_w, thumb_h))
+                cells.append((0, 0, main_w, main_h))
+                thumb_y = main_h + gap
+                for index in range(thumb_count):
+                    cells.append((
+                        col_positions[index],
+                        thumb_y,
+                        col_sizes[index],
+                        thumb_h,
+                    ))
             else:
-                for i in range(thumb_count):
-                    x = gap + i * (thumb_w + gap)
-                    y = gap
-                    cells.append((x, y, thumb_w, thumb_h))
-                cells.append((gap, gap + thumb_h + gap, main_w, main_h))
+                for index in range(thumb_count):
+                    cells.append((
+                        col_positions[index],
+                        0,
+                        col_sizes[index],
+                        thumb_h,
+                    ))
+                cells.append((0, thumb_h + gap, main_w, main_h))
 
         return cells
 
@@ -133,36 +218,51 @@ def compute_cells(design: CollageDesign, image_count: int) -> list[tuple[int, in
 
 
 def apply_logo(canvas: Image.Image, logo_config: LogoConfig) -> Image.Image:
-    logo_path = logo_config.path
-    if not logo_path.is_file():
-        raise FileNotFoundError(f"Logo not found: {logo_path}")
+    logo_path = resolve_asset_path(
+        logo_config.path,
+        [Path.cwd(), logo_config.path.parent],
+    )
 
     logo = Image.open(logo_path).convert("RGBA")
     canvas_w, canvas_h = canvas.size
-    max_logo_w = int(canvas_w * logo_config.size_ratio)
-    max_logo_h = int(canvas_h * logo_config.size_ratio)
+    max_logo_w = max(1, int(canvas_w * logo_config.size_ratio))
+    max_logo_h = max(1, int(canvas_h * logo_config.size_ratio))
 
-    logo.thumbnail((max_logo_w, max_logo_h), Image.Resampling.LANCZOS)
+    logo_w, logo_h = logo.size
+    scale = min(max_logo_w / logo_w, max_logo_h / logo_h)
+    new_w = max(1, int(logo_w * scale))
+    new_h = max(1, int(logo_h * scale))
+    logo = logo.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     if logo_config.opacity < 1.0:
         alpha = logo.split()[3]
-        alpha = alpha.point(lambda p: int(p * logo_config.opacity))
+        alpha = alpha.point(lambda value: int(value * logo_config.opacity))
         logo.putalpha(alpha)
 
     padding = logo_config.padding
-    lw, lh = logo.size
-
     positions = {
         "top-left": (padding, padding),
-        "top-right": (canvas_w - lw - padding, padding),
-        "bottom-left": (padding, canvas_h - lh - padding),
-        "bottom-right": (canvas_w - lw - padding, canvas_h - lh - padding),
+        "top-right": (canvas_w - new_w - padding, padding),
+        "bottom-left": (padding, canvas_h - new_h - padding),
+        "bottom-right": (canvas_w - new_w - padding, canvas_h - new_h - padding),
     }
     position = positions[logo_config.corner]
 
     result = canvas.convert("RGBA")
     result.paste(logo, position, logo)
     return result
+
+
+def save_image(image: Image.Image, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = output_path.suffix.lower()
+
+    if suffix in {".jpg", ".jpeg"}:
+        image.convert("RGB").save(output_path, quality=95)
+    elif suffix == ".webp":
+        image.save(output_path, quality=95)
+    else:
+        image.save(output_path)
 
 
 def create_collage(
@@ -186,15 +286,11 @@ def create_collage(
 
     for image_path, (x, y, w, h) in zip(images, cells):
         with Image.open(image_path) as img:
-            fitted = fit_image(img, (w, h))
-            if fitted.mode == "RGBA":
-                canvas.paste(fitted, (x, y), fitted)
-            else:
-                canvas.paste(fitted, (x, y))
+            fitted = cover_image(img, (w, h))
+            canvas.paste(fitted, (x, y), fitted)
 
     if design.logo:
         canvas = apply_logo(canvas, design.logo)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(output_path, quality=95)
+    save_image(canvas, output_path)
     return output_path
