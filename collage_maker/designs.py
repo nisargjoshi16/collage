@@ -9,6 +9,7 @@ from typing import Any
 
 
 CORNER_CHOICES = ("top-left", "top-right", "bottom-left", "bottom-right")
+FIT_MODE_CHOICES = ("smart", "contain", "cover")
 
 PRESETS: dict[str, dict[str, Any]] = {
     "grid_2x2": {
@@ -107,6 +108,7 @@ class CollageDesign:
     featured_ratio: float = 0.6
     featured_side: str = "left"
     auto_fit: bool = True
+    fit_mode: str = "smart"
     logo: LogoConfig | None = None
 
     @classmethod
@@ -140,6 +142,7 @@ class CollageDesign:
             featured_ratio=float(data.get("featured_ratio", 0.6)),
             featured_side=data.get("featured_side", "left"),
             auto_fit=bool(data.get("auto_fit", True)),
+            fit_mode=_resolve_fit_mode(data),
             logo=logo,
         )
 
@@ -158,6 +161,19 @@ class CollageDesign:
             raise ValueError("featured_ratio must be between 0.2 and 0.85")
         if self.featured_side not in ("left", "right", "top", "bottom"):
             raise ValueError("featured_side must be left, right, top, or bottom")
+        if self.fit_mode not in FIT_MODE_CHOICES:
+            raise ValueError(
+                f"Invalid fit_mode '{self.fit_mode}'. "
+                f"Choose from: {', '.join(FIT_MODE_CHOICES)}"
+            )
+
+
+def _resolve_fit_mode(data: dict[str, Any]) -> str:
+    if "fit_mode" in data:
+        return str(data["fit_mode"])
+    if data.get("smart_crop") is False:
+        return "cover"
+    return "smart"
 
 
 def load_design(

@@ -12,5 +12,6 @@ env/
 output/
 *.png
 !assets/logo.png
+!assets/models/*.onnx
 .DS_Store
 Thumbs.db

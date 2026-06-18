@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from .designs import CollageDesign, LogoConfig, resolve_asset_path
+from .smart_crop import smart_cover_image
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
 
@@ -32,8 +33,11 @@ def hex_to_rgb(color: str) -> tuple[int, int, int]:
     return tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Resize and crop an image to completely fill the target size."""
+def cover_image(image: Image.Image, size: tuple[int, int], fit_mode: str = "smart") -> Image.Image:
+    """Resize and crop an image to fill the target using the selected fit strategy."""
+    if fit_mode != "cover":
+        return smart_cover_image(image, size, fit_mode=fit_mode)
+
     target_w, target_h = size
     if target_w <= 0 or target_h <= 0:
         return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
@@ -286,7 +290,7 @@ def create_collage(
 
     for image_path, (x, y, w, h) in zip(images, cells):
         with Image.open(image_path) as img:
-            fitted = cover_image(img, (w, h))
+            fitted = cover_image(img, (w, h), fit_mode=design.fit_mode)
             canvas.paste(fitted, (x, y), fitted)
 
     if design.logo:

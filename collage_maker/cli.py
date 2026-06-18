@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .collage import create_collage
-from .designs import CORNER_CHOICES, list_presets, load_design, resolve_asset_path
+from .designs import CORNER_CHOICES, FIT_MODE_CHOICES, list_presets, load_design, resolve_asset_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,6 +73,12 @@ Examples:
         help="Maximum number of images to include",
     )
     parser.add_argument(
+        "--fit-mode",
+        choices=FIT_MODE_CHOICES,
+        default=None,
+        help="How photos fill each cell: smart (default), contain, or cover",
+    )
+    parser.add_argument(
         "--list-presets",
         action="store_true",
         help="List available design presets and exit",
@@ -103,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
                 size_ratio=args.logo_size,
                 padding=args.logo_padding,
             )
+
+        if args.fit_mode:
+            design.fit_mode = args.fit_mode
 
         output = create_collage(
             image_folder=args.folder,
