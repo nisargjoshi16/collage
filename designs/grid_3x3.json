@@ -1,0 +1,8 @@
+{
+  "layout": "grid",
+  "rows": 3,
+  "cols": 3,
+  "output_size": [1500, 1500],
+  "gap": 6,
+  "background": "#F5F5F5"
+}

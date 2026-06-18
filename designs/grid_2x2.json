@@ -1,0 +1,14 @@
+{
+  "layout": "grid",
+  "rows": 2,
+  "cols": 2,
+  "output_size": [1200, 1200],
+  "gap": 8,
+  "background": "#FFFFFF",
+  "logo": {
+    "path": "assets/logo.png",
+    "corner": "bottom-right",
+    "size_ratio": 0.1,
+    "padding": 20
+  }
+}
